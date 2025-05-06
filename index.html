@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Lost Relic Adventure</title>
+  <style>
+    body {
+      font-family: 'Courier New', monospace;
+      background: linear-gradient(to bottom, #0f0f0f, #1a1a1a);
+      color: #f8f8f2;
+      margin: 0;
+      padding: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+    }
+
+    #game {
+      max-width: 600px;
+      width: 90%;
+      background: #1c1c1e;
+      padding: 1.5em;
+      border: 3px solid #333;
+      border-radius: 15px;
+      box-shadow: 0 0 25px rgba(0, 0, 0, 0.5);
+      position: relative;
+      text-align: center;
+    }
+
+    h2 {
+      margin-top: 0;
+      color: #ffd700;
+      text-shadow: 1px 1px 5px #000;
+    }
+
+    #map {
+      display: grid;
+      grid-template-columns: repeat(5, 45px);
+      gap: 6px;
+      margin: 15px auto;
+      justify-content: center;
+    }
+
+    .tile {
+      width: 45px;
+      height: 45px;
+      background: #3a3a3a;
+      text-align: center;
+      line-height: 45px;
+      border-radius: 8px;
+      transition: transform 0.2s ease, background 0.3s ease;
+      font-size: 20px;
+    }
+
+    .tile:hover {
+      transform: scale(1.05);
+      background: #4a4a4a;
+    }
+
+    .player { background: #32cd32; box-shadow: 0 0 5px #32cd32; }
+    .enemy { background: #dc143c; box-shadow: 0 0 5px #dc143c; }
+    .relic { background: #ffd700; box-shadow: 0 0 5px #ffd700; }
+
+    #log {
+      height: 100px;
+      overflow-y: auto;
+      background: #111;
+      padding: 8px;
+      border: 1px solid #555;
+      margin-top: 15px;
+      font-size: 14px;
+      border-radius: 6px;
+      text-align: left;
+    }
+
+    #levelIntro {
+      position: fixed;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.95);
+      color: #ffd700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      font-size: 28px;
+      z-index: 1000;
+      opacity: 0;
+      pointer-events: none;
+      animation: fadeInOut 3s ease-in-out forwards;
+      text-align: center;
+      padding: 20px;
+    }
+
+    @keyframes fadeInOut {
+      0% { opacity: 0; }
+      10% { opacity: 1; }
+      90% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+    #timer, #lives {
+      font-size: 16px;
+      margin-top: 10px;
+      font-weight: bold;
+      text-shadow: 0 0 3px #000;
+    }
+
+    #lives { color: #ff6347; }
+    #timer { color: #87cefa; }
+
+    #controls {
+      margin-top: 15px;
+    }
+
+    button {
+      background: #444;
+      color: #fff;
+      border: none;
+      padding: 8px 15px;
+      font-size: 16px;
+      border-radius: 5px;
+      margin: 5px;
+      transition: background 0.3s ease, transform 0.2s ease;
+    }
+
+    button:hover {
+      background: #666;
+      transform: scale(1.05);
+    }
+  </style>
+</head>
+<body>
+  <div id="game">
+    <h2>Lost Relic Adventure</h2>
+    <p>Use arrow keys to move. Avoid enemies. Find the relics!</p>
+    <div id="timer"></div>
+    <div id="lives">❤️ Lives: 3</div>
+    <div id="map"></div>
+    <div id="log"></div>
+    <div id="controls">
+      <button onclick="backToDifficulty()">Restart Game</button>
+    </div>
+  </div>
+  <div id="levelIntro"></div>
+
+  <script>
+    const mapSize = 5;
+    const player = { x: 0, y: 0 };
+    let relicsFound = 0, currentLevel = 0, relicPositions = [], enemies = [], timer = 0, interval;
+    let lives = 3;
+
+    const map = document.getElementById('map');
+    const log = document.getElementById('log');
+    const levelIntro = document.getElementById('levelIntro');
+    const timerDisplay = document.getElementById('timer');
+    const livesDisplay = document.getElementById('lives');
+
+    const levels = [
+      { title: "Level 1: The Forgotten Forest", relics: [{x:2,y:1},{x:4,y:3},{x:1,y:4}], enemies: [], hidden: false },
+      { title: "Level 2: Dark Caverns", relics: [{x:1,y:0},{x:3,y:2},{x:0,y:4}], enemies: [{x:2,y:2}], hidden: false },
+      { title: "Level 3: Mystic River", relics: [{x:0,y:1},{x:2,y:3},{x:4,y:0}], enemies: [{x:1,y:1},{x:3,y:3}], hidden: false, moving: true },
+      { title: "Level 4: Ancient Ruins", relics: [{x:1,y:2},{x:3,y:4},{x:2,y:0}], enemies: [{x:0,y:2},{x:4,y:1}], hidden: true, moving: true },
+      { title: "Level 5: Lost Temple", relics: [{x:0,y:0},{x:4,y:4},{x:2,y:2}], enemies: [{x:1,y:1},{x:3,y:3},{x:0,y:4}], hidden: true, moving: true, timed: true }
+    ];
+
+    function drawMap() {
+      map.innerHTML = '';
+      for (let y = 0; y < mapSize; y++) {
+        for (let x = 0; x < mapSize; x++) {
+          const tile = document.createElement('div');
+          tile.className = 'tile';
+          if (player.x === x && player.y === y) {
+            tile.classList.add('player'); tile.textContent = '🧍';
+          } else if (!levels[currentLevel].hidden && relicPositions.some(p => p.x === x && p.y === y)) {
+            tile.classList.add('relic'); tile.textContent = '🏺';
+          } else if (enemies.some(e => e.x === x && e.y === y)) {
+            tile.classList.add('enemy'); tile.textContent = '👹';
+          }
+          map.appendChild(tile);
+        }
+      }
+    }
+
+    function logMessage(msg) {
+      log.innerHTML += `<div>${msg}</div>`;
+      log.scrollTop = log.scrollHeight;
+    }
+
+    function movePlayer(dx, dy) {
+      const newX = player.x + dx, newY = player.y + dy;
+      if (newX >= 0 && newX < mapSize && newY >= 0 && newY < mapSize) {
+        player.x = newX; player.y = newY;
+        checkRelic();
+        checkEnemy();
+        drawMap();
+        if (levels[currentLevel].moving) moveEnemies();
+      }
+    }
+
+    function checkRelic() {
+      for (let i = 0; i < relicPositions.length; i++) {
+        if (player.x === relicPositions[i].x && player.y === relicPositions[i].y) {
+          relicsFound++;
+          logMessage("You found a relic! 🏺");
+          relicPositions.splice(i, 1);
+          if (relicsFound === 3) {
+            logMessage("🎉 Level complete!");
+            document.removeEventListener('keydown', handleKey);
+            if (levels[currentLevel].timed) clearInterval(interval);
+            setTimeout(() => {
+              currentLevel++;
+              if (currentLevel < levels.length) startLevel(currentLevel);
+              else logMessage("🏆 All relics recovered! You win!");
+            }, 1500);
+          }
+          break;
+        }
+      }
+    }
+
+    function checkEnemy() {
+      if (enemies.some(e => e.x === player.x && e.y === player.y)) {
+        lives--;
+        livesDisplay.textContent = `❤️ Lives: ${lives}`;
+        logMessage("💀 You were hit by an enemy! -1 life");
+        if (lives <= 0) {
+          logMessage("☠️ Game over. You've run out of lives.");
+          document.removeEventListener('keydown', handleKey);
+          if (levels[currentLevel].timed) clearInterval(interval);
+        }
+      }
+    }
+
+    function moveEnemies() {
+      enemies.forEach(enemy => {
+        const dirs = [[0,-1],[0,1],[-1,0],[1,0]];
+        const [dx,dy] = dirs[Math.floor(Math.random()*4)];
+        const nx = enemy.x + dx, ny = enemy.y + dy;
+        if (nx>=0 && nx<mapSize && ny>=0 && ny<mapSize) { enemy.x = nx; enemy.y = ny; }
+      });
+      checkEnemy();
+      drawMap();
+    }
+
+    function handleKey(e) {
+      switch (e.key) {
+        case 'ArrowUp': movePlayer(0,-1); break;
+        case 'ArrowDown': movePlayer(0,1); break;
+        case 'ArrowLeft': movePlayer(-1,0); break;
+        case 'ArrowRight': movePlayer(1,0); break;
+      }
+    }
+
+    function showLevelIntro(title) {
+      levelIntro.textContent = title;
+      levelIntro.style.animation = 'fadeInOut 3s ease-in-out forwards';
+      levelIntro.style.opacity = '1';
+      levelIntro.style.pointerEvents = 'auto';
+      setTimeout(() => {
+        levelIntro.style.opacity = '0';
+        levelIntro.style.pointerEvents = 'none';
+        document.addEventListener('keydown', handleKey);
+      }, 3000);
+    }
+
+    function startTimer(seconds) {
+      timer = seconds;
+      timerDisplay.textContent = `⏱️ Time Left: ${timer}s`;
+      interval = setInterval(() => {
+        timer--;
+        timerDisplay.textContent = `⏱️ Time Left: ${timer}s`;
+        if (timer <= 0) {
+          clearInterval(interval);
+          logMessage("⏰ Time's up! Game Over.");
+          document.removeEventListener('keydown', handleKey);
+        }
+      }, 1000);
+    }
+
+    function startLevel(index) {
+      const level = levels[index];
+      player.x = 0; player.y = 0;
+      relicsFound = 0;
+      relicPositions = level.relics.map(p => ({...p}));
+      enemies = level.enemies.map(e => ({...e}));
+      log.innerHTML = '';
+      drawMap();
+      showLevelIntro(level.title);
+      if (level.timed) startTimer(60);
+    }
+
+    function restartGame() {
+      lives = 3;
+      currentLevel = 0;
+      livesDisplay.textContent = `❤️ Lives: ${lives}`;
+      startLevel(currentLevel);
+    }
+
+    function backToDifficulty() {
+      location.reload(); // Placeholder for now
+    }
+
+    startLevel(currentLevel);
+  </script>
+</body>
+</html>
